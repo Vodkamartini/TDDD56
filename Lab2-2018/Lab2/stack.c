@@ -50,7 +50,7 @@ stack_check(stack_t *stack)
 {
 // Do not perform any sanity check if performance is bein measured
 #if MEASURE == 0
-	// Use assert() to check if your stack is in a state that makes sens
+	// Use assert() to check if your stack is in a state that makes sense
 	// This test should always pass 
 	assert(1 == 1);
 
@@ -62,12 +62,47 @@ stack_check(stack_t *stack)
 }
 
 int /* Return the type you prefer */
-stack_push(/* Make your own signature */)
+stack_push(stack_t *stack, int value)
 {
 #if NON_BLOCKING == 0
-  // Implement a lock_based stack
+
+  pthread_mutex_lock(&stack->mutex);
+  Node_t *new_node;
+  new_node = malloc(sizeof(Node_t));  // Allocate memory for the new_node node
+  
+  new_node->val = value;
+  new_node->next = stack->head;
+  stack->head = new_node;
+
+  free(new_node); // We are now done with the temp node so we free it
+  pthread_mutex_unlock(&stack->mutex);
+
 #elif NON_BLOCKING == 1
   // Implement a harware CAS-based stack
+
+  size_t casRes;
+
+  do {
+
+    // Do some speculative work
+    Node_t *new_node;
+    new_node = malloc(sizeof(Node_t));
+
+    new_node->val = value;
+    new_node->next = stack->head;
+    stack->head = new_node;
+
+    free(new_node);
+
+    // Try Compare & Swap
+    casRes = cas(
+      (size_t*)&stack->head,  // Memory location / Check location
+      (size_t)stack->head,    // Expected value / Old value
+      (size_t)new_node        // New value
+    );
+
+  } while(casRes != stack->head);
+
 #else
   /*** Optional ***/
   // Implement a software CAS-based stack
@@ -82,12 +117,48 @@ stack_push(/* Make your own signature */)
 }
 
 int /* Return the type you prefer */
-stack_pop(/* Make your own signature */)
+stack_pop(stack_t *stack)
 {
+  // If the stack is empty there is nothing to pop...
+  if(stack->head == NULL) {
+    return -1;
+  }
+
 #if NON_BLOCKING == 0
-  // Implement a lock_based stack
+  
+  pthread_mutex_lock(&stack->mutex);
+
+  Node_t *next_node = NULL;
+
+  next_node = stack->head->next;
+  stack->head = next_node;
+
+  free(next_node);
+
+  pthread_mutex_unlock(&stack->mutex);
+
 #elif NON_BLOCKING == 1
   // Implement a harware CAS-based stack
+  size_t casRes;
+  do {
+
+    // Do some speculative work
+    Node_t *next_node = NULL;
+
+    next_node = stack->head->next;
+    stack->head = next_node;
+
+    free(next_node);
+
+    // Try Compare & Swap
+    casRes = cas(
+      (size_t*)&stack->head,    // Memory location / Check location
+      (size_t)stack->head,      // Expected value / Old value
+      (size_t)next_node         // New value
+    );
+
+  } while(casRes != (size_t)stack->head);
+
 #else
   /*** Optional ***/
   // Implement a software CAS-based stack
