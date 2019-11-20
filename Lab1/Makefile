@@ -34,10 +34,10 @@ mandelbrot-$(MAXITER)-$(WIDTH)-$(HEIGHT)-$(LOWER_R)-$(UPPER_R)-$(LOWER_I)-$(UPPE
 
 mandelbrot-$(MAXITER)-$(WIDTH)-$(HEIGHT)-$(LOWER_R)-$(UPPER_R)-$(LOWER_I)-$(UPPER_I)-$(NB_THREADS)-$(LOADBALANCE).o: mandelbrot.c
 	gcc $(CFLAGS) -c -o mandelbrot-$(MAXITER)-$(WIDTH)-$(HEIGHT)-$(LOWER_R)-$(UPPER_R)-$(LOWER_I)-$(UPPER_I)-$(NB_THREADS)-$(LOADBALANCE).o mandelbrot.c
-	
+
 ppm.o: ppm.c
 	gcc $(CFLAGS) -c -o ppm.o ppm.c
-	
+
 gl_mandelbrot.o: gl_mandelbrot.c
 	gcc $(CFLAGS) -c -o gl_mandelbrot.o gl_mandelbrot.c
 
