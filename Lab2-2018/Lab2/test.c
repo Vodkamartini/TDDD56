@@ -5,20 +5,20 @@
  *  Copyright 2011 Nicolas Melot
  *
  * This file is part of TDDD56.
- * 
+ *
  *     TDDD56 is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
- * 
+ *
  *     TDDD56 is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY; without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
- * 
+ *
  *     You should have received a copy of the GNU General Public License
  *     along with TDDD56. If not, see <http://www.gnu.org/licenses/>.
- * 
+ *
  */
 
 #include <stdio.h>
@@ -84,6 +84,8 @@ assert_fun(int expr, const char *str, const char *file, const char* function, si
 stack_t *stack;
 data_t data;
 
+poolStack_t *pool_stack;
+
 #if MEASURE != 0
 struct stack_measure_arg
 {
@@ -130,23 +132,53 @@ stack_measure_push(void* arg)
 
 /* A bunch of optional (but useful if implemented) unit tests for your stack */
 void
+print_stack()
+{
+  Node* node = stack->head;
+  printf("\n");
+  while(node != NULL) {
+    printf("%i ", node->val);
+    node = node->next;
+  }
+  printf("\n");
+}
+
+
+void
 test_init()
 {
   // Initialize your test batch
+  data = DATA_VALUE;
+
+  // Allocate memory for a new stack and pool (and set all values to 0)
+  stack = malloc(sizeof(stack_t));
+  pool_stack = malloc(sizeof(poolStack_t));
+
+// HÄR ÄR DET FEL
+  pool_stack->head = malloc(sizeof(Node));
+  Node* node = pool_stack->head;
+  for(int i = 0; i < MAX_PUSH_POP; i++) {
+    node->next = malloc(sizeof(Node));
+    node = node->next;
+    node->val = 0;
+  }
 }
 
 void
 test_setup()
 {
+  print_stack(pool_stack);
   // Allocate and initialize your test stack before each test
-  data = DATA_VALUE;
-
-  // Allocate a new stack and reset its values
-  stack = malloc(sizeof(stack_t));
-
-  // Reset explicitely all members to a well-known initial value
-  // For instance (to be deleted as your stack design progresses):
-  stack->top = 0;
+  stack_push(stack, pool_stack, 1);
+  stack_push(stack, pool_stack, 2);
+  stack_push(stack, pool_stack, 3);
+  stack_push(stack, pool_stack, 4);
+  stack_push(stack, pool_stack, 5);
+  stack_push(stack, pool_stack, 6);
+  stack_push(stack, pool_stack, 7);
+  stack_push(stack, pool_stack, 8);
+  stack_push(stack, pool_stack, 9);
+  stack_push(stack, pool_stack, 10);
 }
 
 void
@@ -154,13 +186,41 @@ test_teardown()
 {
   // Do not forget to free your stacks after each test
   // to avoid memory leaks
-  free(stack);
+  //free(stack); // since we do not use malloc, we cannot use free anymore, we put the "freed" elements back in the pool
+
+  // Instead we loop through and pop the entire stack
+  while(stack->head != NULL) {
+    stack_pop(stack, pool_stack);
+  }
 }
 
 void
 test_finalize()
 {
   // Destroy properly your test batch
+  // I.e. now we actually want to DELETE the memory we have allocated in test_init()
+
+  Node* node = stack->head;
+  // Again, we loop through the stack like in test_init(), but we free allocated elements
+  Node* temp;
+  while(node != NULL) {
+    temp = node;
+    node = node->next;
+    free(temp);
+  }
+
+  // Same for pool since we want to DELETE that one too
+  node = pool_stack->head;
+  while(node != NULL) {
+    temp = node;
+    node = node->next;
+    free(temp);
+  }
+
+  // Lastly, delete the stacks
+  free(stack);
+  free(pool_stack);
+
 }
 
 int
@@ -170,7 +230,8 @@ test_push_safe()
   // several threads push concurrently to it
 
   // Do some work
-  stack_push(stack, DATA_VALUE);
+  stack_push(stack, pool_stack, DATA_VALUE);
+  print_stack(stack);
 
   // check if the stack is in a consistent state
   int res = assert(stack_check(stack));
@@ -178,7 +239,7 @@ test_push_safe()
   // check other properties expected after a push operation
   // (this is to be updated as your stack design progresses)
   // Now, the test succeeds
-  return res && assert(stack->top == 0);
+  return res && assert(stack->head->val == DATA_VALUE);
 }
 
 int
@@ -187,14 +248,40 @@ test_pop_safe()
   // Same as the test above for parallel pop operation
 
   // For now, this test always fails
-  stack_pop(stack);
+  int test = stack->head->next->val;
+  printf("\nHead should after pop be: %i", test);
+  stack_pop(stack, pool_stack);
+  print_stack(stack);
 
   int res = assert(stack_check(stack));
-  return res && assert(stack->top == 0);
+  return res && assert(stack->head->val == test);
 }
 
 // 3 Threads should be enough to raise and detect the ABA problem
 #define ABA_NB_THREADS 3
+
+// Create the ABA problem according to Lession 1
+void* thread0 (void* arg) {
+  print_stack(stack);
+  stack_pop_ABA(stack, pool_stack);
+
+  return NULL;
+}
+
+void* thread1(void* arg) {
+  print_stack(stack);
+  stack_pop(stack, pool_stack);
+  stack_push(stack, pool_stack, DATA_VALUE);
+
+  return NULL;
+}
+
+void* thread2(void* arg) {
+  print_stack(stack);
+  stack_pop(stack, pool_stack);
+
+  return NULL;
+}
 
 int
 test_aba()
@@ -202,6 +289,24 @@ test_aba()
 #if NON_BLOCKING == 1 || NON_BLOCKING == 2
   int success, aba_detected = 0;
   // Write here a test for the ABA problem
+
+  // Create the three threads
+  pthread_t thread[3];
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+  pthread_create(&thread[0], &attr, thread0, NULL);
+  sleep(0.2);
+  pthread_create(&thread[1], &attr, thread1, NULL);
+  sleep(0.2);
+  pthread_create(&thread[2], &attr, thread2, NULL);
+
+  pthread_join(thread[0], NULL);
+  pthread_join(thread[1], NULL);
+  pthread_join(thread[2], NULL);
+
+  print_stack(stack);
+
   success = aba_detected;
   return success;
 #else
@@ -260,7 +365,7 @@ test_cas()
 
   counter = 0;
   pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE); 
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
   pthread_mutexattr_init(&mutex_attr);
   pthread_mutex_init(&lock, &mutex_attr);
 

@@ -5,20 +5,20 @@
  *  Copyright 2011 Nicolas Melot
  *
  * This file is part of TDDD56.
- * 
+ *
  *     TDDD56 is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
  *     the Free Software Foundation, either version 3 of the License, or
  *     (at your option) any later version.
- * 
+ *
  *     TDDD56 is distributed in the hope that it will be useful,
  *     but WITHOUT ANY WARRANTY without even the implied warranty of
  *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *     GNU General Public License for more details.
- * 
+ *
  *     You should have received a copy of the GNU General Public License
  *     along with TDDD56. If not, see <http://www.gnu.org/licenses/>.
- * 
+ *
  */
 
 #ifndef DEBUG
@@ -51,7 +51,7 @@ stack_check(stack_t *stack)
 // Do not perform any sanity check if performance is bein measured
 #if MEASURE == 0
 	// Use assert() to check if your stack is in a state that makes sense
-	// This test should always pass 
+	// This test should always pass
 	assert(1 == 1);
 
 	// This test fails if the task is not allocated or if the allocation failed
@@ -62,44 +62,43 @@ stack_check(stack_t *stack)
 }
 
 int /* Return the type you prefer */
-stack_push(stack_t *stack, int value)
+stack_push(stack_t *stack, poolStack_t *pool_stack, int value)
 {
 #if NON_BLOCKING == 0
 
   pthread_mutex_lock(&stack->mutex);
-  Node_t *new_node;
-  new_node = malloc(sizeof(Node_t));  // Allocate memory for the new_node node
-  
-  new_node->val = value;
-  new_node->next = stack->head;
-  stack->head = new_node;
+	Node* old_head = stack->head;
+	Node* pool_element = pool_stack->head;
 
-  free(new_node); // We are now done with the temp node so we free it
+	pool_stack->head = pool_element->next;
+
+	pool_element->next = old_head;
+	stack->head = pool_element;
+	pool_element->val = value;
   pthread_mutex_unlock(&stack->mutex);
 
 #elif NON_BLOCKING == 1
   // Implement a harware CAS-based stack
-
   size_t casRes;
 
   do {
 
-    // Do some speculative work
-    Node_t *new_node;
-    new_node = malloc(sizeof(Node_t));
+		// Speculative work
+		Node* old_head = stack->head;
+		Node* pool_element = pool_stack->head;
+		pool_element->val = value;	// New value for CAS
 
-    new_node->val = value;
-    new_node->next = stack->head;
-    stack->head = new_node;
-
-    free(new_node);
+		Node* new_pool_element = pool_element->next;
 
     // Try Compare & Swap
     casRes = cas(
-      (size_t*)&stack->head,  // Memory location / Check location
-      (size_t)stack->head,    // Expected value / Old value
-      (size_t)new_node        // New value
+      (size_t*)&stack->head,  		// Memory location / Check location
+			(size_t)old_head,    			  // Expected value / Old value
+    	(size_t)pool_element        // New value
     );
+
+		stack->head->next = old_head;
+		pool_stack->head = new_pool_element;
 
   } while(casRes != stack->head);
 
@@ -117,7 +116,7 @@ stack_push(stack_t *stack, int value)
 }
 
 int /* Return the type you prefer */
-stack_pop(stack_t *stack)
+stack_pop(stack_t *stack, poolStack_t *pool_stack)
 {
   // If the stack is empty there is nothing to pop...
   if(stack->head == NULL) {
@@ -125,15 +124,16 @@ stack_pop(stack_t *stack)
   }
 
 #if NON_BLOCKING == 0
-  
+
   pthread_mutex_lock(&stack->mutex);
 
-  Node_t *next_node = NULL;
+	Node* old_head = stack->head;
+	Node* pool_element = pool_stack->head;
 
-  next_node = stack->head->next;
-  stack->head = next_node;
+	stack->head = old_head->next;
 
-  free(next_node);
+	pool_stack->head = old_head;
+	pool_stack->head->next = pool_element;
 
   pthread_mutex_unlock(&stack->mutex);
 
@@ -143,19 +143,20 @@ stack_pop(stack_t *stack)
   do {
 
     // Do some speculative work
-    Node_t *next_node = NULL;
+		Node* old_head = stack->head;
+		Node* pool_element = pool_stack->head;
 
-    next_node = stack->head->next;
-    stack->head = next_node;
-
-    free(next_node);
+		Node* old_pool_head = pool_element->next;
 
     // Try Compare & Swap
-    casRes = cas(
-      (size_t*)&stack->head,    // Memory location / Check location
-      (size_t)stack->head,      // Expected value / Old value
-      (size_t)next_node         // New value
+		casRes = cas(
+      (size_t*)&stack->head,  		// Memory location / Check location
+			(size_t)old_head,    			  // Expected value / Old value
+    	(size_t)pool_element        // New value
     );
+
+		pool_stack->head = old_head;
+		pool_stack->head->next = old_pool_head;
 
   } while(casRes != (size_t)stack->head);
 
@@ -164,6 +165,37 @@ stack_pop(stack_t *stack)
   // Implement a software CAS-based stack
 #endif
 
+// This function does the same as the regular pop but intentionally sleeps to force ABA problem
   return 0;
 }
 
+int
+stack_pop_ABA(stack_t* stack, poolStack_t* pool_stack)
+{
+	size_t casRes;
+	do {
+
+		// Do some speculative work
+		Node* old_head = stack->head;
+		Node* pool_element = pool_stack->head;
+
+		Node* old_pool_head = pool_element->next;
+
+		// Sleep before we do CAS to force ABA
+
+		sleep(5);
+
+		// Try Compare & Swap
+		casRes = cas(
+			(size_t*)&stack->head,  		// Memory location / Check location
+			(size_t)old_head,    			  // Expected value / Old value
+			(size_t)pool_element        // New value
+		);
+
+		pool_stack->head = old_head;
+		pool_stack->head->next = old_pool_head;
+
+	} while(casRes != (size_t)stack->head);
+
+	return 0;
+}
