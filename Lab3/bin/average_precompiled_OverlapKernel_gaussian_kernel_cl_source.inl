@@ -59,10 +59,10 @@ size_t get_device_id()
 static unsigned char gaussian_kernel(int o, size_t stride, __local const unsigned char * m, skepu_vec_proxy_float stencil, size_t elemPerPx)
 {
 	// your code here
-	float scaling = 0;
-	float res = 0;
+	float scaling = 0.0f;
+	float res = 0.0f;
 	for(int step = -o; step <= o; step += elemPerPx) {
-			res += m[step*(int)stride] * stencil.data[step+o];	// Use value from stencil
+			res += m[(int)stride*step] * stencil.data[step+o];	// Use value from stencil
 			scaling += stencil.data[step + o];	// Scaling must now match the stencil's influence
 		}
 

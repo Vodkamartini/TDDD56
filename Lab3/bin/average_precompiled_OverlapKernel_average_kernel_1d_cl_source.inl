@@ -55,9 +55,9 @@ static unsigned char average_kernel_1d(int o, size_t stride, __local const unsig
 {
 	// your code here
 	float scaling = 1.0 / (o/elemPerPx*2+1);
-	float res = 0;
+	float res = 0.0f;
 	for(int step = -o; step <= o; step += elemPerPx)	// elemPerPx = 3 for RGB images
-		res += m[step*(int)stride];	// Include stride to step correct number of bytes
+		res += m[(int)stride*step];	// Include stride to step correct number of bytes
 	return res * scaling;
 }
 
