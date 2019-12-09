@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #include "stack.h"
 #include "non_blocking.h"
@@ -64,31 +65,31 @@ stack_check(stack_t *stack)
 int /* Return the type you prefer */
 stack_push(stack_t *stack, poolStack_t *pool_stack, int value)
 {
+	if(pool_stack->head == NULL) return 0;
 #if NON_BLOCKING == 0
 
   pthread_mutex_lock(&stack->mutex);
-	Node* old_head = stack->head;
-	Node* pool_element = pool_stack->head;
+	Node* old_head = stack->head;						// Head of stack
+	Node* pool_element = pool_stack->head;	// Head of pool stack
 
-	pool_stack->head = pool_element->next;
+	pool_stack->head = pool_element->next;	// Leave pool head "floating"
 
-	pool_element->next = old_head;
-	stack->head = pool_element;
-	pool_element->val = value;
+	pool_element->next = old_head;					// Make the "floating" pool head, the new head of stack
+	stack->head = pool_element;							// Reroute head of stack to point to its new head
+	pool_element->val = value;							// Assign value
   pthread_mutex_unlock(&stack->mutex);
 
 #elif NON_BLOCKING == 1
   // Implement a harware CAS-based stack
   size_t casRes;
-
-  do {
-
+//	do {
 		// Speculative work
-		Node* old_head = stack->head;
+
+		/*Node* old_head = stack->head;
 		Node* pool_element = pool_stack->head;
 		pool_element->val = value;	// New value for CAS
 
-		Node* new_pool_element = pool_element->next;
+		Node* new_pool_element = pool_element->next;	// Set up new node as next node
 
     // Try Compare & Swap
     casRes = cas(
@@ -97,10 +98,22 @@ stack_push(stack_t *stack, poolStack_t *pool_stack, int value)
     	(size_t)pool_element        // New value
     );
 
+		// Reroute head
 		stack->head->next = old_head;
 		pool_stack->head = new_pool_element;
 
-  } while(casRes != stack->head);
+//  } while(casRes != (size_t) old_head);*/
+
+		Node* old_head = stack->head;
+		Node* new_head = pool_stack->head;
+		new_head->val = value;	// New value for CAS
+		Node* new_pool_element = new_head->next;	// Set up new node as next node
+
+		cas(&(stack->head), old_head, new_head);
+
+		stack->head->next = old_head;
+		pool_stack->head = new_pool_element;
+
 
 #else
   /*** Optional ***/
@@ -119,46 +132,52 @@ int /* Return the type you prefer */
 stack_pop(stack_t *stack, poolStack_t *pool_stack)
 {
   // If the stack is empty there is nothing to pop...
-  if(stack->head == NULL) {
-    return -1;
-  }
+  if(stack->head == NULL) return 0;
 
 #if NON_BLOCKING == 0
 
   pthread_mutex_lock(&stack->mutex);
 
-	Node* old_head = stack->head;
-	Node* pool_element = pool_stack->head;
+	Node* old_head = stack->head;						// Head of stack
+	Node* pool_element = pool_stack->head;	// Head of pool stack
 
-	stack->head = old_head->next;
+	stack->head = old_head->next;						// Point "past" old head of stack
 
-	pool_stack->head = old_head;
-	pool_stack->head->next = pool_element;
+	pool_stack->head = old_head;						// Make the old head of stack the new head of pool stack
+	pool_stack->head->next = pool_element;	// Make the new pool head point to the old pool head
 
   pthread_mutex_unlock(&stack->mutex);
 
 #elif NON_BLOCKING == 1
   // Implement a harware CAS-based stack
   size_t casRes;
-  do {
+	int result;
+
+	 //do {
 
     // Do some speculative work
-		Node* old_head = stack->head;
+		/*Node* old_head = stack->head;
 		Node* pool_element = pool_stack->head;
+		Node* old_pool_head = pool_element->next;*/
 
-		Node* old_pool_head = pool_element->next;
+		Node* old_head = stack->head;
+		Node* new_head = stack->head->next;
+		Node* old_pool_head = pool_stack->head;
 
     // Try Compare & Swap
-		casRes = cas(
+		/*casRes = cas(
       (size_t*)&stack->head,  		// Memory location / Check location
 			(size_t)old_head,    			  // Expected value / Old value
     	(size_t)pool_element        // New value
     );
+		result = old_head->val;*/
 
-		pool_stack->head = old_head;
-		pool_stack->head->next = old_pool_head;
+		cas(&(stack->head), old_head, new_head);
 
-  } while(casRes != (size_t)stack->head);
+		pool_stack->head = old_head;						// If CAS worked, reroute pool head as old head of stack
+		pool_stack->head->next = old_pool_head;	// Make "new" pool head point towards the pool stack's old head
+
+  //} while(casRes != (size_t)stack->head);
 
 #else
   /*** Optional ***/
@@ -172,30 +191,36 @@ stack_pop(stack_t *stack, poolStack_t *pool_stack)
 int
 stack_pop_ABA(stack_t* stack, poolStack_t* pool_stack)
 {
+
+	#if NON_BLOCKING == 1
 	size_t casRes;
-	do {
 
 		// Do some speculative work
+		//do{
 		Node* old_head = stack->head;
-		Node* pool_element = pool_stack->head;
+		//Node* pool_element = pool_stack->head;
+		Node* new_head = stack->head->next;
+		Node* old_alloc = pool_stack->head;
 
-		Node* old_pool_head = pool_element->next;
+		//Node* old_pool_head = pool_element->next;
 
 		// Sleep before we do CAS to force ABA
 
-		sleep(5);
+		sleep(2);
 
 		// Try Compare & Swap
-		casRes = cas(
-			(size_t*)&stack->head,  		// Memory location / Check location
-			(size_t)old_head,    			  // Expected value / Old value
-			(size_t)pool_element        // New value
+		cas(&(stack->head),  		// Memory location / Check location
+				old_head,    				// Expected value / Old value
+				new_head        		// New value
 		);
 
 		pool_stack->head = old_head;
-		pool_stack->head->next = old_pool_head;
+		pool_stack->head->next = old_alloc;
+		//pool_stack->head = old_head;
+		//pool_stack->head->next = old_pool_head;
 
-	} while(casRes != (size_t)stack->head);
+	//} while(casRes != (size_t)stack->head);
+	#endif
 
 	return 0;
 }
