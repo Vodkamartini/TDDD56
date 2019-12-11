@@ -33,16 +33,16 @@ int writeppm(char *filename, int width, int height, unsigned char *data)
 	if (filename != NULL)
 	{
 		fp = fopen(filename,"w");
-		
+
 		if (fp != NULL)
 		{
 			// Write PPM file
-			// Header	
+			// Header
 			fprintf(fp, "P3\n");
 			fprintf(fp, "# written by Ingemars PPM writer\n");
 			fprintf(fp, "%d %d\n", width, height);
 			fprintf(fp, "%d\n", 255); // range
-			
+
 			// Data
 			for (v = height-1; v >=0; v--)
 			{
@@ -53,7 +53,7 @@ int writeppm(char *filename, int width, int height, unsigned char *data)
 				}
 				fprintf(fp, "\n"); // range
 			}
-			
+
 			if (fwrite("\n",sizeof(char),1,fp) == 1)
 				error = 0; // Probable success
 			fclose(fp);
@@ -76,7 +76,7 @@ unsigned char *readppm(char *filename, int *width, int *height)
 	int n;
 	int m;
 	unsigned char *image;
-	
+
 	fd = fopen(filename, "rb");
 	if (fd == NULL)
 	{
@@ -86,34 +86,34 @@ unsigned char *readppm(char *filename, int *width, int *height)
 	c = getc(fd);
 	if (c=='P' || c=='p')
 		c = getc(fd);
-	
+
 	if (c == '3')
 	{
 		printf("%s is a PPM file (plain text version)\n", filename);
-		
+
 		// NOTE: This is not very good PPM code! Comments are not allowed
 		// except immediately after the magic number.
 		c = getc(fd);
 		if (c == '\n' || c == '\r') // Skip any line break and comments
 		{
 			c = getc(fd);
-			while(c == '#') 
+			while(c == '#')
 			{
 				fscanf(fd, "%[^\n\r] ", b);
 				printf("%s\n",b);
 				c = getc(fd);
 			}
-			ungetc(c,fd); 
+			ungetc(c,fd);
 		}
 		fscanf(fd, "%d %d %d", &n, &m, &k);
-		
+
 		printf("%d rows  %d columns  max value= %d\n",n,m,k);
-		
+
 		numbytes = n * m * 3;
 		image = (unsigned char *) malloc(numbytes);
 		if (image == NULL)
 		{
-			printf("Memory allocation failed!\n"); 
+			printf("Memory allocation failed!\n");
 			return NULL;
 		}
 		for(i=m-1;i>=0;i--) for(j=0;j<n;j++) // Important bug fix here!
@@ -127,29 +127,29 @@ unsigned char *readppm(char *filename, int *width, int *height)
 	else
 	if (c == '6')
 	{
-		printf("%s is a PPM file (raw version)!\n", filename); 
-		
+		printf("%s is a PPM file (raw version)!\n", filename);
+
 		c = getc(fd);
 		if (c == '\n' || c == '\r') // Skip any line break and comments
 		{
 			c = getc(fd);
-			while(c == '#') 
+			while(c == '#')
 			{
 				fscanf(fd, "%[^\n\r] ", b);
 				printf("%s\n",b);
 				c = getc(fd);
 			}
-			ungetc(c,fd); 
+			ungetc(c,fd);
 		}
 		fscanf(fd, "%d %d %d", &n, &m, &k);
 		printf("%d rows  %d columns  max value= %d\n",m,n,k);
 		c = getc(fd); // Skip the last whitespace
-		
+
 		numbytes = n * m * 3;
 		image = (unsigned char *) malloc(numbytes);
 		if (image == NULL)
 		{
-			printf("Memory allocation failed!\n"); 
+			printf("Memory allocation failed!\n");
 			return NULL;
 		}
 		// Read and re-order as necessary
@@ -162,12 +162,12 @@ unsigned char *readppm(char *filename, int *width, int *height)
 	}
 	else
 	{
-		printf("%s is not a PPM file!\n", filename); 
+		printf("%s is not a PPM file!\n", filename);
 		return NULL;
 	}
-	
+
 	printf("read image\n");
-	
+
 	*height = m;
 	*width = n;
 	return image;
@@ -179,9 +179,9 @@ GLint readppmtexture(char *filename, char dofilter, char dorepeat)
 	int width, height, w, h;
 	unsigned char *image;
 	GLuint tex;
-	
+
 	image = readppm(filename, &width, &height);
-	
+
 	// Check if power of 2
 	w = 1;
 	while (w < width) w = w << 1;
@@ -193,7 +193,7 @@ GLint readppmtexture(char *filename, char dofilter, char dorepeat)
 		printf("Try readppm() with mipmapping instead.\n");
 		return 0;
 	}
-	
+
 	glGenTextures(1, &tex);
 	glBindTexture(GL_TEXTURE_2D, tex);
 	glPixelStorei(GL_UNPACK_ALIGNMENT,1);
@@ -220,6 +220,6 @@ GLint readppmtexture(char *filename, char dofilter, char dorepeat)
 		glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
 	}
 	// free(image);
-	
+
 	return tex;
 }

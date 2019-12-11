@@ -50,6 +50,6 @@ int main()
 	}
 */
 	printf("\n*----------- BENCHMARKING -----------*");
-	printf("\n\nCalculations on the CPU ran in %f miliseconds \n\n", time );
+	printf("\n\nThe filtering was finished in %f microseconds. \n\n", time );
 
 }

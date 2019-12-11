@@ -100,6 +100,14 @@ struct timespec t_start[NB_THREADS], t_stop[NB_THREADS], start, stop;
 void*
 stack_measure_pop(void* arg)
   {
+    data = DATA_VALUE;
+    stack = malloc(sizeof(stack_t));
+    pool_stack = malloc(sizeof(poolStack_t)*NB_THREADS);
+
+    stack->head = malloc(sizeof(Node));
+    Node* node = stack->head;
+    node->val = DATA_VALUE;
+
     stack_measure_arg_t *args = (stack_measure_arg_t*) arg;
     int i;
 
@@ -107,6 +115,10 @@ stack_measure_pop(void* arg)
     for (i = 0; i < MAX_PUSH_POP / NB_THREADS; i++)
       {
         // See how fast your implementation can pop MAX_PUSH_POP elements in parallel
+        node->next = malloc(sizeof(Node));
+        node = node->next;
+        node->val = DATA_VALUE;
+
       }
     clock_gettime(CLOCK_MONOTONIC, &t_stop[args->id]);
 
@@ -116,14 +128,27 @@ stack_measure_pop(void* arg)
 void*
 stack_measure_push(void* arg)
 {
+  data = DATA_VALUE;
+  stack = malloc(sizeof(stack_t));
+  pool_stack = malloc(sizeof(poolStack_t)*NB_THREADS);
+
   stack_measure_arg_t *args = (stack_measure_arg_t*) arg;
   int i;
 
   clock_gettime(CLOCK_MONOTONIC, &t_start[args->id]);
-  for (i = 0; i < MAX_PUSH_POP / NB_THREADS; i++)
-    {
-        // See how fast your implementation can push MAX_PUSH_POP elements in parallel
-    }
+  for(int t = 0; t < NB_THREADS; ++t)
+  {
+    pool_stack->head = malloc(sizeof(Node));
+    Node* node = pool_stack->head;
+
+    for (i = 0; i < MAX_PUSH_POP / NB_THREADS; i++)
+      {
+        node->next = malloc(sizeof(stack_t));
+        node = node->next;
+        node->val = 0;
+          // See how fast your implementation can push MAX_PUSH_POP elements in parallel
+      }
+  }
   clock_gettime(CLOCK_MONOTONIC, &t_stop[args->id]);
 
   return NULL;
