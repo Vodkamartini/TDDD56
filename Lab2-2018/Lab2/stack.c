@@ -205,7 +205,6 @@ stack_pop_ABA(stack_t* stack, poolStack_t* pool_stack)
 		//Node* old_pool_head = pool_element->next;
 
 		// Sleep before we do CAS to force ABA
-
 		sleep(2);
 
 		// Try Compare & Swap
@@ -221,6 +220,6 @@ stack_pop_ABA(stack_t* stack, poolStack_t* pool_stack)
 
 	//} while(casRes != (size_t)stack->head);
 	#endif
-
-	return 0;
+	// If 2 is returned, then we have an ABA problem
+	return stack->head->next->val;
 }
