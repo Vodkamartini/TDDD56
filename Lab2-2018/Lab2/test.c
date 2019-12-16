@@ -96,29 +96,19 @@ typedef struct stack_measure_arg stack_measure_arg_t;
 
 struct timespec t_start[NB_THREADS], t_stop[NB_THREADS], start, stop;
 
+
 #if MEASURE == 1
 void*
 stack_measure_pop(void* arg)
   {
-    data = DATA_VALUE;
-    stack = malloc(sizeof(stack_t));
-    pool_stack = malloc(sizeof(poolStack_t)*NB_THREADS);
-
-    stack->head = malloc(sizeof(Node));
-    Node* node = stack->head;
-    node->val = DATA_VALUE;
-
     stack_measure_arg_t *args = (stack_measure_arg_t*) arg;
     int i;
 
     clock_gettime(CLOCK_MONOTONIC, &t_start[args->id]);
     for (i = 0; i < MAX_PUSH_POP / NB_THREADS; i++)
       {
+        stack_pop(stack, &pool_stack[args->id]);
         // See how fast your implementation can pop MAX_PUSH_POP elements in parallel
-        node->next = malloc(sizeof(Node));
-        node = node->next;
-        node->val = DATA_VALUE;
-
       }
     clock_gettime(CLOCK_MONOTONIC, &t_stop[args->id]);
 
@@ -128,26 +118,37 @@ stack_measure_pop(void* arg)
 void*
 stack_measure_push(void* arg)
 {
-  data = DATA_VALUE;
-  stack = malloc(sizeof(stack_t));
-  pool_stack = malloc(sizeof(poolStack_t)*NB_THREADS);
 
   stack_measure_arg_t *args = (stack_measure_arg_t*) arg;
   int i;
 
   clock_gettime(CLOCK_MONOTONIC, &t_start[args->id]);
-  for(int t = 0; t < NB_THREADS; ++t)
+  for (i = 0; i < MAX_PUSH_POP / NB_THREADS; i++)
   {
-    pool_stack->head = malloc(sizeof(Node));
-    Node* node = pool_stack->head;
+      stack_push(stack, &pool_stack[args->id], DATA_VALUE);
+      // See how fast your implementation can push MAX_PUSH_POP elements in parallel
+  }
 
-    for (i = 0; i < MAX_PUSH_POP / NB_THREADS; i++)
-      {
-        node->next = malloc(sizeof(stack_t));
-        node = node->next;
-        node->val = 0;
-          // See how fast your implementation can push MAX_PUSH_POP elements in parallel
-      }
+  clock_gettime(CLOCK_MONOTONIC, &t_stop[args->id]);
+
+  return NULL;
+}
+#elif MEASURE == 3
+void*
+stack_measure_push_pop(void* arg)
+{
+
+  stack_measure_arg_t *args = (stack_measure_arg_t*) arg;
+  int i;
+
+  clock_gettime(CLOCK_MONOTONIC, &t_start[args->id]);
+  for(i = 0; i < MAX_PUSH_POP / NB_THREADS; i++)
+  {
+    stack_push(stack, &pool_stack[args->id], DATA_VALUE);
+  }
+  for(i = 0; i < MAX_PUSH_POP / NB_THREADS; i++)
+  {
+    stack_pop(stack, &pool_stack[args->id]);
   }
   clock_gettime(CLOCK_MONOTONIC, &t_stop[args->id]);
 
@@ -155,6 +156,46 @@ stack_measure_push(void* arg)
 }
 #endif
 #endif
+
+void pop_measure_init()
+{
+    // Initialize your test batch
+    data = DATA_VALUE;
+    // Allocate a new stack and reset its values
+    stack = malloc(sizeof(stack_t));
+    pool_stack = malloc(sizeof(poolStack_t)*NB_THREADS);
+
+    stack->head = malloc(sizeof(Node));
+    Node* curr = stack->head;
+    curr->val = DATA_VALUE;
+
+    for( int i=0; i<MAX_PUSH_POP; ++i){
+        curr->next = malloc(sizeof(Node));
+        curr = curr->next;
+        curr->val = DATA_VALUE;
+    }
+}
+
+void push_measure_init()
+{
+  // Initialize your test batch
+  data = DATA_VALUE;
+  // Allocate a new stack and reset its values
+  stack = malloc(sizeof(stack_t));
+  pool_stack = malloc(sizeof(poolStack_t)*NB_THREADS);
+
+  for( int t=0; t<NB_THREADS; ++t){
+      pool_stack[t].head = malloc(sizeof(Node));
+      Node* curr = pool_stack[t].head;
+
+      for( int i=0; i<MAX_PUSH_POP/NB_THREADS; ++i){
+          curr->next = malloc(sizeof(Node));
+          curr = curr->next;
+          curr->val = 0;
+      }
+  }
+}
+
 
 /* A bunch of optional (but useful if implemented) unit tests for your stack */
 void
@@ -480,15 +521,21 @@ setbuf(stdout, NULL);
   pthread_attr_t attr;
   stack_measure_arg_t arg[NB_THREADS];
   pthread_attr_init(&attr);
-
+#if MEASURE==1
+  pop_measure_init();
+#elif MEASURE==2 || MEASURE == 3
+  push_measure_init();
+#endif
   clock_gettime(CLOCK_MONOTONIC, &start);
   for (i = 0; i < NB_THREADS; i++)
     {
       arg[i].id = i;
 #if MEASURE == 1
       pthread_create(&thread[i], &attr, stack_measure_pop, (void*)&arg[i]);
-#else
+#elif MEASURE == 2
       pthread_create(&thread[i], &attr, stack_measure_push, (void*)&arg[i]);
+#elif MEASURE == 3
+      pthread_create(&thread[i], &attr, stack_measure_push_pop, (void*)&arg[i]);
 #endif
     }
 
