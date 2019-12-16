@@ -303,10 +303,10 @@ test_push_safe()
   // several threads push concurrently to it
 
   // Do some work
-  printf("Starting push test, expecting 5 4 3 2 1, we have:");
+  printf("Starting push test, expecting 1 2 3, we have:");
   print_stack(stack);
   stack_push(stack, pool_stack, DATA_VALUE);
-  printf("After push we expect 5 5 4 3 2 1, we got:");
+  printf("After push we expect 5 1 2 3, we got:");
   print_stack(stack);
 
   // check if the stack is in a consistent state
@@ -334,7 +334,7 @@ test_pop_safe()
 
   int res = assert(stack_check(stack));
   return res && assert(stack->head->val == test);*/
-  printf("Starting pop test, expecting 5 4 3 2 1, we have:");
+  printf("Starting pop test, expecting 1 2 3, we have:");
   print_stack(stack);
   Node* pool_stack_head_rem = stack->head;
   if(pool_stack_head_rem == NULL){
@@ -342,7 +342,7 @@ test_pop_safe()
   }
 
   stack_pop(stack,pool_stack);
-  printf("After pop we expect 4 3 2 1, we got:");
+  printf("After pop we expect 2 3, we got:");
   print_stack(stack);
 
   return assert(stack->head != pool_stack_head_rem);
@@ -372,7 +372,7 @@ void* thread1(void* arg) {
   printf("Thread 1 ended. \n");
   return NULL;
 }
-
+/*
 void* thread2(void* arg) {
   printf("Start Thread 2\n Stack:");
   print_stack(stack);
@@ -381,7 +381,7 @@ void* thread2(void* arg) {
   printf("Thread 2 ended. \n");
   return NULL;
 }
-
+*/
 int
 test_aba()
 {
@@ -395,7 +395,7 @@ test_aba()
   //    Thread 1 pushes 1 back to the stack, the stack is now head -> 1 -> 3
   //    Thread 0 is now allowed to run now and compare 1 == 1, which will pass as correct, however next is still 2 which is wrong
 
-  // Create the three threads defined above
+  // Create the two threads defined above
   pthread_t thread[2];
   pthread_attr_t attr;
   pthread_attr_init(&attr);
