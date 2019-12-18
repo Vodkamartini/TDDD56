@@ -63,16 +63,16 @@ stack_check(stack_t *stack)
 }
 
 int /* Return the type you prefer */
-stack_push(stack_t *stack, poolStack_t *pool_stack, int value)
+stack_push(stack_t *stack, poolStack_t *pool_stack, int value, int poolIdx)
 {
 	if(pool_stack->head == NULL) return 0;
 #if NON_BLOCKING == 0
 
   pthread_mutex_lock(&stack->mutex);
 	Node* old_head = stack->head;						// Head of stack
-	Node* pool_element = pool_stack->head;	// Head of pool stack
+	Node* pool_element = pool_stack->head[poolIdx];	// Head of pool stack
 
-	pool_stack->head = pool_element->next;	// Leave pool head "floating"
+	pool_stack->head[poolIdx] = pool_element->next;	// Leave pool head "floating"
 
 	pool_element->next = old_head;					// Make the "floating" pool head, the new head of stack
 	stack->head = pool_element;							// Reroute head of stack to point to its new head
@@ -82,7 +82,7 @@ stack_push(stack_t *stack, poolStack_t *pool_stack, int value)
 #elif NON_BLOCKING == 1
   // Implement a harware CAS-based stack
   size_t casRes;
-//	do {
+
 		// Speculative work
 
 		/*Node* old_head = stack->head;
@@ -101,19 +101,22 @@ stack_push(stack_t *stack, poolStack_t *pool_stack, int value)
 		// Reroute head
 		stack->head->next = old_head;
 		pool_stack->head = new_pool_element;
-
-//  } while(casRes != (size_t) old_head);*/
-
-		Node* old_head = stack->head;
-		Node* new_head = pool_stack->head;
-		new_head->val = value;	// New value for CAS
+*/
+		Node* old_head;
+		Node* new_head;
 		Node* new_pool_element = new_head->next;	// Set up new node as next node
 
-		cas(&(stack->head), old_head, new_head);
+		do {
+
+		old_head = stack->head;
+		new_head = pool_stack->head[poolIdx];
+		new_head->val = value;	// New value for CAS
+
+		casRes = cas((size_t*)&(stack->head), (size_t)old_head, (size_t)new_head);
+		} while(casRes != (size_t) old_head);
 
 		stack->head->next = old_head;
-		pool_stack->head = new_pool_element;
-
+		pool_stack->head[poolIdx] = new_pool_element;
 
 #else
   /*** Optional ***/
@@ -129,7 +132,7 @@ stack_push(stack_t *stack, poolStack_t *pool_stack, int value)
 }
 
 int /* Return the type you prefer */
-stack_pop(stack_t *stack, poolStack_t *pool_stack)
+stack_pop(stack_t *stack, poolStack_t *pool_stack, int poolIdx)
 {
   // If the stack is empty there is nothing to pop...
   if(stack->head == NULL) return 0;
@@ -139,12 +142,12 @@ stack_pop(stack_t *stack, poolStack_t *pool_stack)
   pthread_mutex_lock(&stack->mutex);
 
 	Node* old_head = stack->head;						// Head of stack
-	Node* pool_element = pool_stack->head;	// Head of pool stack
+	Node* pool_element = pool_stack->head[poolIdx];	// Head of pool stack
 
 	stack->head = old_head->next;						// Point "past" old head of stack
 
-	pool_stack->head = old_head;						// Make the old head of stack the new head of pool stack
-	pool_stack->head->next = pool_element;	// Make the new pool head point to the old pool head
+	pool_stack->head[poolIdx] = old_head;						// Make the old head of stack the new head of pool stack
+	pool_stack->head[poolIdx]->next = pool_element;	// Make the new pool head point to the old pool head
 
   pthread_mutex_unlock(&stack->mutex);
 
@@ -153,17 +156,16 @@ stack_pop(stack_t *stack, poolStack_t *pool_stack)
   size_t casRes;
 	int result;
 
-	 //do {
+	// d
+	Node* old_head;
+	Node* new_head;
 
+	Node* old_pool_head = pool_stack->head[poolIdx];
     // Do some speculative work
 		/*Node* old_head = stack->head;
 		Node* pool_element = pool_stack->head;
 		Node* old_pool_head = pool_element->next;*/
-
-		Node* old_head = stack->head;
-		Node* new_head = stack->head->next;
-		Node* old_pool_head = pool_stack->head;
-
+		do {
     // Try Compare & Swap
 		/*casRes = cas(
       (size_t*)&stack->head,  		// Memory location / Check location
@@ -171,13 +173,15 @@ stack_pop(stack_t *stack, poolStack_t *pool_stack)
     	(size_t)pool_element        // New value
     );
 		result = old_head->val;*/
+		old_head = stack->head;
+		new_head = stack->head->next;
+		casRes = cas((size_t*)&(stack->head), (size_t)old_head, (size_t)new_head);
+	} while(casRes != (size_t)old_head);
 
-		cas(&(stack->head), old_head, new_head);
+		pool_stack->head[poolIdx] = old_head;						// If CAS worked, reroute pool head as old head of stack
+		pool_stack->head[poolIdx]->next = old_pool_head;	// Make "new" pool head point towards the pool stack's old head
 
-		pool_stack->head = old_head;						// If CAS worked, reroute pool head as old head of stack
-		pool_stack->head->next = old_pool_head;	// Make "new" pool head point towards the pool stack's old head
-
-  //} while(casRes != (size_t)stack->head);
+//
 
 #else
   /*** Optional ***/
@@ -189,7 +193,7 @@ stack_pop(stack_t *stack, poolStack_t *pool_stack)
 }
 
 int
-stack_pop_ABA(stack_t* stack, poolStack_t* pool_stack)
+stack_pop_ABA(stack_t* stack, poolStack_t* pool_stack, int poolIdx)
 {
 
 	#if NON_BLOCKING == 1
@@ -200,7 +204,7 @@ stack_pop_ABA(stack_t* stack, poolStack_t* pool_stack)
 		Node* old_head = stack->head;
 		//Node* pool_element = pool_stack->head;
 		Node* new_head = stack->head->next;
-		Node* old_alloc = pool_stack->head;
+		Node* old_alloc = pool_stack->head[poolIdx];
 
 		//Node* old_pool_head = pool_element->next;
 
@@ -213,8 +217,8 @@ stack_pop_ABA(stack_t* stack, poolStack_t* pool_stack)
 				new_head        		// New value
 		);
 
-		pool_stack->head = old_head;
-		pool_stack->head->next = old_alloc;
+		pool_stack->head[poolIdx] = old_head;
+		pool_stack->head[poolIdx]->next = old_alloc;
 		//pool_stack->head = old_head;
 		//pool_stack->head->next = old_pool_head;
 

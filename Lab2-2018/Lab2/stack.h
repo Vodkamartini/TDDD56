@@ -45,16 +45,16 @@ struct stack
 typedef struct stack stack_t;
 
 struct poolStack  {
-  Node* head;
+  Node* head[8];
   #if NON_BLOCKING == 0
     pthread_mutex_t mutex;
   #endif
 };
 typedef struct poolStack poolStack_t;
 
-int stack_push(stack_t *stack, poolStack_t *pool_stack, int value);
-int stack_pop(stack_t *stack, poolStack_t *pool_stack);
-int stack_pop_ABA(stack_t* stack, poolStack_t* pool_stack);
+int stack_push(stack_t *stack, poolStack_t *pool_stack, int value, int poolIdx);
+int stack_pop(stack_t *stack, poolStack_t *pool_stack, int poolIdx);
+int stack_pop_ABA(stack_t* stack, poolStack_t* pool_stack, int poolIdx);
 /* Use this to check if your stack is in a consistent state from time to time */
 int stack_check(stack_t *stack);
 #endif /* STACK_H */

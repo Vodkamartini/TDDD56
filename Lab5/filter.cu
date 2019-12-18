@@ -33,7 +33,32 @@
 #define maxKernelSizeX 10
 #define maxKernelSizeY 10
 
+#define SIZE 32
+
 //#define separable
+//#define gaussian
+#define median
+
+__device__ int pooper(int *histogram, int kernelsize)
+{
+  int pixelCounter = 0;
+  int value;
+  int prevValue = 0;
+	for(int i = 0; i < 256; i++) {
+		// Check if we have traversed half of the kernel (i.e. where the median should be)
+		// Since a lot of values will be zero in the histogram, we need to count
+		// the number of elements actually containing "real" information
+		pixelCounter += histogram[i];
+		if(pixelCounter > kernelsize/2) {
+			value = (prevValue != 0) ? (i + prevValue)/2 : i;	// Return the median
+			break;
+		}
+		prevValue = (histogram[i] != 0) ? i : prevValue;
+	}
+	return value;
+}
+
+
 __global__ void filter(unsigned char *image, unsigned char *out, const unsigned int imagesizex, const unsigned int imagesizey, const int kernelsizex, const int kernelsizey)
 {
   // map from blockIdx to pixel position
@@ -43,8 +68,8 @@ __global__ void filter(unsigned char *image, unsigned char *out, const unsigned 
 
   // ****** Allocate Shared Memory ****** //
   // We need a MAXMEMSIZE since kernelsize specify a filter of size (2*kernelsize + 1)
-  const int MAXMEMSIZEX = 2 * maxKernelSizeX + 1;
-  const int MAXMEMSIZEY = 2 * maxKernelSizeY + 1;
+  const int MAXMEMSIZEX = 2 * SIZE + 1;
+  const int MAXMEMSIZEY = 2 * SIZE + 1;
   __shared__ unsigned char smem[MAXMEMSIZEX*MAXMEMSIZEY*3]; // 3 for RGB
 
   // Define our shared memory block
@@ -52,12 +77,12 @@ __global__ void filter(unsigned char *image, unsigned char *out, const unsigned 
   // ***** THE PROBLEM SEEMS TO BE LOCATED HERE ***** //
   int memBlockStartX = max(0, (int)(blockIdx.x*blockDim.x) - kernelsizex);
   int memBlockStartY = max(0, (int)(blockIdx.y*blockDim.y) - kernelsizey);
-  int memBlockEndX = min(imagesizex-1, memBlockStartX + (int)blockDim.x + (2*kernelsizex -1)); // Using different constants in the last paranthesis seems to alter the result the most
-  int memBlockEndY = min(imagesizey-1, memBlockStartY + (int)blockDim.y + (2*kernelsizey -1)); // These values provide a nice result for separable filters though...
+  int memBlockEndX = min(imagesizex-1, memBlockStartX + (int)blockDim.x + (2*kernelsizex)); // Using different constants in the last paranthesis seems to alter the result the most
+  int memBlockEndY = min(imagesizey-1, memBlockStartY + (int)blockDim.y + (2*kernelsizey)); // These values provide a nice result for separable filters though...
 
   // Define thread memory by calculating shared memory block size to actual block size ratio
   int memBlockSize = (memBlockEndX - memBlockStartX + 1) * (memBlockEndY - memBlockStartY + 1);
-  int blocksize = blockDim.x * blockDim.y;
+  int blocksize = (blockDim.x * blockDim.y)/4;
   int threadMem = (int)(memBlockSize/(blocksize));
 
   int memSizeX = memBlockEndX - memBlockStartX + 1;
@@ -89,18 +114,39 @@ __global__ void filter(unsigned char *image, unsigned char *out, const unsigned 
 
   // ****** Actual Filter ****** //
   int dy, dx;
+  #ifndef median
   unsigned int sumx, sumy, sumz;
-
-  int divby = (2*kernelsizex+1) * (2*kernelsizex+1); // Works for box filters only!
-
+	sumx=0;sumy=0;sumz=0;
+  #endif
   // Shared Memory coordinates
   int sx = x - memBlockStartX;
   int sy = y - memBlockStartY;
 
+  #ifdef gaussian
+    // Define gaussian kernel weights for 5 x 5 filter kernel
+    int weights[] = {1, 4, 6, 4, 1};
+    int divby = 16;
+  #else
+    int divby = (2*kernelsizex+1) * (2*kernelsizex+1); // Works for box filters only!
+  #endif
+
 	if (x < imagesizex && y < imagesizey) // If inside image
 	{
-  // Filter kernel (simple box filter)
-	sumx=0;sumy=0;sumz=0;
+    #ifdef median
+      // Median filtering can be done without sorting is we use a histogram instead
+      int histogramX[256];
+      int histogramY[256];
+      int histogramZ[256];
+      for(int i = 0; i < 256; i++) {
+        histogramX[i] = 0;
+        histogramY[i] = 0;
+        histogramZ[i] = 0;
+      }
+    #endif
+
+
+  // Filter kernel
+
 	for(dy=-kernelsizey;dy<=kernelsizey;dy++)
 		for(dx=-kernelsizex;dx<=kernelsizex;dx++)
 		{
@@ -110,14 +156,33 @@ __global__ void filter(unsigned char *image, unsigned char *out, const unsigned 
 
       int sharedIndex = 3* (xx + memSizeX*yy);
 
-      // Instead, collect data from Shared Memory rather than Global Memory
-			sumx += smem[sharedIndex];
-			sumy += smem[sharedIndex+1];
-			sumz += smem[sharedIndex+2];
+      #ifdef gaussian
+        // For gaussian filter we use the stencil to filter
+        int stencil = weights[dx+dy+2];
+        sumx += stencil * smem[sharedIndex];
+        sumy += stencil * smem[sharedIndex+1];
+        sumz += stencil * smem[sharedIndex+2];
+      #elif defined(median)
+        histogramX[(int)(smem[sharedIndex])]  += 1;
+        histogramY[(int)(smem[sharedIndex+1])]+= 1;
+        histogramZ[(int)(smem[sharedIndex+2])]+= 1;
+      #else
+        // Instead, collect data from Shared Memory rather than Global Memory
+			  sumx += smem[sharedIndex];
+        sumy += smem[sharedIndex+1];
+        sumz += smem[sharedIndex+2];
+      #endif
 		}
-	out[(y*imagesizex+x)*3+0] = sumx/divby;
-	out[(y*imagesizex+x)*3+1] = sumy/divby;
-	out[(y*imagesizex+x)*3+2] = sumz/divby;
+
+  #ifdef median
+  out[(y*imagesizex+x)*3+0] = pooper(histogramX, divby);
+  out[(y*imagesizex+x)*3+1] = pooper(histogramY, divby);
+  out[(y*imagesizex+x)*3+2] = pooper(histogramZ, divby);
+  #else
+	 out[(y*imagesizex+x)*3+0] = sumx/divby;
+	 out[(y*imagesizex+x)*3+1] = sumy/divby;
+	 out[(y*imagesizex+x)*3+2] = sumz/divby;
+  #endif
 	}
 }
 
@@ -138,7 +203,7 @@ void computeImages(int kernelsizex, int kernelsizey)
 
   // ***** OUR BLOCKSIZE VARIABLE IS PROVIDING SOME WEIRD OUTPUTS IF CHANGED AS WELL ****** //
   // For boxfilters we cannot use a blocksize >= 10
-  int blocksize = 10;
+  int blocksize = 4;
 
 	pixels = (unsigned char *) malloc(imagesizex*imagesizey*3);
 	cudaMalloc( (void**)&dev_input, imagesizex*imagesizey*3);
@@ -146,19 +211,18 @@ void computeImages(int kernelsizex, int kernelsizey)
 	cudaMalloc( (void**)&dev_bitmap, imagesizex*imagesizey*3);
 
   cudaMalloc( (void**)&dev_temp, imagesizex * imagesizey * 3);
-    // If we want to use separable filter kernels, run this code
-    #ifdef separable
+    #if defined(gaussian) || defined(separable)
+      // If we want to use separable filter kernels, run this code
       dim3 grid1(imagesizex/(blocksize), imagesizey);
-      dim3 grid2(imagesizex*3, imagesizey/blocksize);
       dim3 blockGrid1(blocksize,1);
-      dim3 blockGrid2(3*1, blocksize);
+      dim3 grid2(imagesizex*3, imagesizey/blocksize);
+      dim3 blockGrid2(3, blocksize);
       filter<<<grid1, blockGrid1>>>(dev_input, dev_temp, imagesizex, imagesizey, kernelsizex, 0);   // Output goes into temp variable, no kernelsizey
       filter<<<grid2, blockGrid2>>>(dev_temp, dev_bitmap, imagesizex, imagesizey, 0, kernelsizey);  // Input is temp variable here, no kernelsizex
     #else
-    // "Normal" box-filter kernel
-      dim3 grid(3*imagesizex/ blocksize, imagesizey / blocksize);
+      // "Normal" box-filter kernel
+      dim3 grid(imagesizex/ blocksize, imagesizey / blocksize);
       dim3 blockGrid(3*blocksize, blocksize);
-    //  dim3 grid(imagesizex, imagesizey);
       filter<<<grid, blockGrid>>>(dev_input, dev_bitmap, imagesizex, imagesizey, kernelsizex, kernelsizey); // Awful load balance
     #endif
 
@@ -209,8 +273,11 @@ int main( int argc, char** argv)
 	if (argc > 1)
 		image = readppm(argv[1], (int *)&imagesizex, (int *)&imagesizey);
 	else
-		image = readppm((char *)"maskros512.ppm", (int *)&imagesizex, (int *)&imagesizey);
-
+    #ifdef median
+		  image = readppm((char *)"maskros-noisy.ppm", (int *)&imagesizex, (int *)&imagesizey);
+    #else
+      image = readppm((char *)"img1.ppm", (int *)&imagesizex, (int *)&imagesizey);
+    #endif
 	if (imagesizey >= imagesizex)
 		glutInitWindowSize( imagesizex*2, imagesizey );
 	else
@@ -218,11 +285,23 @@ int main( int argc, char** argv)
 	glutCreateWindow("Lab 5");
 	glutDisplayFunc(Draw);
 
+  int filterX = 5;
+  int filterY = 5;
 	ResetMilli();
-	computeImages(2, 2);
+	computeImages(filterX, filterY);
   int time = GetMicroseconds();
 
   printf("\n*----------- BENCHMARKING -----------*");
+  #ifdef separable
+    printf("\n\nSeparable filter");
+  #elif defined gaussian
+    printf("\n\nGaussian filter");
+  #elif defined(median)
+    printf("\n\nMedian filter");
+  #else
+    printf("\n\nBox filter\n");
+  #endif
+  printf("\n\nKernel size %ix%i", filterX, filterY);
 	printf("\n\nFiltering took %i microseconds. \n\n", time );
 
 // You can save the result to a file like this:

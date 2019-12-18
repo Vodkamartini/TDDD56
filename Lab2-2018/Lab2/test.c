@@ -32,7 +32,7 @@
 #include "test.h"
 #include "stack.h"
 #include "non_blocking.h"
-
+// PROBLEM RIGHT NOW, SINCE OUR TESTS REQUIRE threadIDX how do we run them in test_run??
 #define test_run(test)\
   printf("[%s:%s:%i] Running test '%s'... ", __FILE__, __FUNCTION__, __LINE__, #test);\
   test_setup();\
@@ -85,7 +85,17 @@ assert_fun(int expr, const char *str, const char *file, const char* function, si
 stack_t *stack;
 data_t data;
 poolStack_t *pool_stack;
-poolStack_t *pool_stack2;
+/*poolStack_t *pool_stacks[8];
+poolStack_t *pool0;
+poolStack_t *pool1;
+poolStack_t *pool2;
+poolStack_t *pool3;
+poolStack_t *pool4;
+poolStack_t *pool5;
+poolStack_t *pool6;
+poolStack_t *pool7;
+poolStack_t *pool8;*/
+
 
 #if MEASURE != 0
 struct stack_measure_arg
@@ -176,7 +186,7 @@ void pop_measure_init()
     }
 }
 
-void push_measure_init()
+void push_measure_init(int poolIdx)
 {
   // Initialize your test batch
   data = DATA_VALUE;
@@ -185,8 +195,8 @@ void push_measure_init()
   pool_stack = malloc(sizeof(poolStack_t)*NB_THREADS);
 
   for( int t=0; t<NB_THREADS; ++t){
-      pool_stack[t].head = malloc(sizeof(Node));
-      Node* curr = pool_stack[t].head;
+      pool_stack[t].head[poolIdx] = malloc(sizeof(Node));
+      Node* curr = pool_stack[t].head[poolIdx];
 
       for( int i=0; i<MAX_PUSH_POP/NB_THREADS; ++i){
           curr->next = malloc(sizeof(Node));
@@ -217,31 +227,40 @@ test_init()
   // Initialize your test batch
   data = DATA_VALUE;
 
-  // Allocate memory for a new stack and pool (and set all values to 0)
+  // Allocate memory for a new stack and array of pools (and set all values to 0)
   stack = malloc(sizeof(stack_t));
+
   pool_stack = malloc(sizeof(poolStack_t));
-  pool_stack2 = malloc(sizeof(poolStack_t));
 
+  for(int i = 0; i < 8; i++)
+  {
+    pool_stack->head[i] = malloc(sizeof(Node));
+    Node* node = pool_stack->head[i];
 
-// HÄR ÄR DET FEL
-  pool_stack->head = malloc(sizeof(Node));
-  Node* node = pool_stack->head;
-
-  for(int i = 0; i < MAX_PUSH_POP; i++) {
-    node->next = malloc(sizeof(Node));
-    node = node->next;
-    node->val = 0;
+    for(int i = 0; i < MAX_PUSH_POP; i++) {
+      node->next = malloc(sizeof(Node));
+      node = node->next;
+      node->val = 0;
+    }
   }
 }
 
 void
 test_setup()
 {
-  print_stack(pool_stack);
-  // Allocate and initialize your test stack before each test
-  stack_push(stack, pool_stack, 3);
-  stack_push(stack, pool_stack, 2);
-  stack_push(stack, pool_stack, 1);
+
+  for (i = 0; i < NB_THREADS; i++)
+  {
+      arg[i].id = i;
+      pthread_create(&thread[i], &attr, test_push_safe(i), (void*)&arg[i]);
+  }
+
+  for(i = 0; i < NB_THREADS; i++)
+  {
+      arg[i].id = i;
+      pthread_create(&thread[i], &attr, test_pop_safe(i), (void*)&arg[i]);
+  }
+
   /*stack_push(stack, pool_stack, 1);
   stack_push(stack, pool_stack, 2);
   stack_push(stack, pool_stack, 3);
@@ -297,18 +316,20 @@ test_finalize()
 }
 
 int
-test_push_safe()
+test_push_safe(int threadIdx)
 {
   // Make sure your stack remains in a good state with expected content when
   // several threads push concurrently to it
 
   // Do some work
-  printf("Starting push test, expecting 1 2 3, we have:");
+  //printf("Starting push test, expecting 1 2 3, we have:");
   print_stack(stack);
-  stack_push(stack, pool_stack, DATA_VALUE);
-  printf("After push we expect 5 1 2 3, we got:");
+  for(int i = 0; i < MAX_PUSH_POP; i++)
+  {
+      stack_push(stack, pool_stack, DATA_VALUE, threadIdx);
+  }
+  //printf("After push we expect 5 1 2 3, we got:");
   print_stack(stack);
-
   // check if the stack is in a consistent state
   //int res = assert(stack_check(stack));
 
@@ -322,7 +343,7 @@ test_push_safe()
 }
 
 int
-test_pop_safe()
+test_pop_safe(int threadIdx)
 {
   // Same as the test above for parallel pop operation
 
@@ -334,14 +355,16 @@ test_pop_safe()
 
   int res = assert(stack_check(stack));
   return res && assert(stack->head->val == test);*/
-  printf("Starting pop test, expecting 1 2 3, we have:");
+/*  printf("Starting pop test, expecting 1 2 3, we have:");
   print_stack(stack);
   Node* pool_stack_head_rem = stack->head;
   if(pool_stack_head_rem == NULL){
     return assert(stack->head == NULL);
+  }*/
+  for(int i = 0; i < MAX_PUSH_POP; i++) {
+    stack_pop(stack,pool_stack, threadIdx);
   }
 
-  stack_pop(stack,pool_stack);
   printf("After pop we expect 2 3, we got:");
   print_stack(stack);
 
@@ -386,7 +409,7 @@ int
 test_aba()
 {
 #if NON_BLOCKING == 1 || NON_BLOCKING == 2
-  int success, aba_detected = 0;
+  //int success, aba_detected = 0;
   // Write here a test for the ABA problem
   //    Stack starts out as head -> 1 -> 2 -> 3
   //    Thread 0 starts pop(), but is put on hold forcefully, is looking at 1 and next = 2
@@ -412,7 +435,7 @@ test_aba()
   printf("Stack after ABA");
   print_stack(stack);
 
-  success = aba_detected;
+  //success = aba_detected;
   //return success;
   return assert(stack->head->next->val == 3);
 #else
